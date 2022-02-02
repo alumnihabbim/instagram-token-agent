@@ -13,20 +13,32 @@ module InstagramTokenAgent
       check_signature == signature
     end
 
+    # Fetch a fresh token from the instagram API
+    #
+    # @return Boolean indicating success or failure
     def refresh
-      # Fetch the latest from the instagram API
       response = get(
         config.refresh_endpoint,
         query: query_params(grant_type: 'ig_refresh_token'),
         headers: {"User-Agent" => "Instagram Token Agent"}
       )
 
-      Store.update(response['access_token'], Time.now + response['expires_in'])
+      if response.success?
 
-      # If we're working with single-use webhooks, schedule a job for the period [token_expiry_buffer] before expiry.
-      if config.refresh_webhook? and config.token_refresh_mode == :cron
-        scheduler = Temporize::Scheduler.new(config)
-        scheduler.queue_refresh((Time.now + response['expires_in'] - config.token_expiry_buffer), signature)
+        Store.update(response['access_token'], Time.now + response['expires_in'], true, nil)
+
+        # If we're working with single-use webhooks, schedule a job for the period [token_expiry_buffer] before expiry.
+        if config.refresh_webhook? and config.token_refresh_mode == :cron
+          scheduler = Temporize::Scheduler.new(config)
+          scheduler.queue_refresh((Time.now + response['expires_in'] - config.token_expiry_buffer), signature)
+        end
+
+        true
+      else
+
+        Store.update(ENV['STARTING_TOKEN'], Time.now, false, response.body)
+
+        false
       end
     end
 
